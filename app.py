@@ -5,6 +5,7 @@ Run:  streamlit run app.py
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -43,6 +44,12 @@ _DEFAULTS = {
 for _k, _v in _DEFAULTS.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
+
+# ── Sync session_state with live app_state after a Streamlit restart ─────────
+# If the background feed is still running (instruments loaded in memory)
+# but session_state got reset, mark feed as started so the dashboard shows.
+if app_state.connected or len(app_state.instruments) > 0:
+    st.session_state["feed_started"] = True
 
 _BEEP_JS = """
 <script>
@@ -263,6 +270,16 @@ with st.sidebar:
     # Save to session state only (never persisted to disk or logs)
     if cid   != st.session_state.client_id:    st.session_state.client_id    = cid
     if token != st.session_state.access_token: st.session_state.access_token = token
+    # ── Persist credentials to .env so they survive restarts ─────────────
+    _env_path = Path(__file__).parent / ".env"
+    if st.button("💾 Save to .env", help="Writes Client ID + Access Token to .env — paste your new daily token here each morning", width="stretch"):
+        if cid and token:
+            from dotenv import set_key
+            set_key(str(_env_path), "DHAN_CLIENT_ID", cid)
+            set_key(str(_env_path), "DHAN_ACCESS_TOKEN", token)
+            st.success("✅ Saved! Credentials will auto-load on next restart.")
+        else:
+            st.warning("Enter both Client ID and Access Token first.")
     st.divider()
     with st.expander("Manual Spot Prices (fallback)"):
         st.caption("Used if REST API can't fetch live spot.")
@@ -277,7 +294,29 @@ with st.sidebar:
         if "429" in err or "Retrying" in err:
             st.warning(f"⏳ {err}")
         elif "EXPIRED" in err or "INVALID" in err or "DH-901" in err:
-            st.error("🔑 Token expired! Generate a new one at web.dhan.co → Profile → API Access")
+            st.error("🔑 Token expired!")
+            st.caption("1. Generate new token at web.dhan.co → Profile → API Access\n2. Paste it in the **Access Token** field above\n3. Click button below")
+            if st.button("🔄 Update Token & Reconnect", type="primary", width="stretch"):
+                if not cid or not token:
+                    st.warning("Paste your new token in the Access Token field above first.")
+                else:
+                    from dotenv import set_key
+                    set_key(str(Path(__file__).parent / ".env"), "DHAN_CLIENT_ID", cid)
+                    set_key(str(Path(__file__).parent / ".env"), "DHAN_ACCESS_TOKEN", token)
+                    app_state.set_connected(False, "")
+                    st.session_state.feed_started = False
+                    st.session_state.client_id    = cid
+                    st.session_state.access_token = token
+                    manual = {"NIFTY": st.session_state.spot_nifty, "BANKNIFTY": st.session_state.spot_banknifty, "SENSEX": st.session_state.spot_sensex}
+                    with st.spinner("Reconnecting with new token…"):
+                        ok, msg = _start_feed(cid, token, manual)
+                    if ok:
+                        st.session_state.feed_started = True
+                        st.success(msg)
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.error(msg)
         else:
             st.error(f"✗ {err}")
     else:
@@ -288,7 +327,7 @@ with st.sidebar:
     # Guard: only show Start button when no feed is running at all
     feed_active = st.session_state.feed_started or app_state.connected
     if not feed_active:
-        if st.button("▶ Start Feed", type="primary", use_container_width=True):
+        if st.button("▶ Start Feed", type="primary", width="stretch"):
             if not cid or not token:
                 st.error("Enter credentials first.")
             else:
@@ -306,9 +345,9 @@ with st.sidebar:
                     st.error(msg)
     else:
         if app_state.connected:
-            st.button("■ Feed Running", disabled=True, use_container_width=True)
+            st.button("■ Feed Running", disabled=True, width="stretch")
         else:
-            st.button("⏳ Reconnecting…", disabled=True, use_container_width=True)
+            st.button("⏳ Reconnecting…", disabled=True, width="stretch")
         c1,c2 = st.columns(2)
         c1.metric("Instruments", len(app_state.get_instruments()))
         c2.metric("Signals",     len(app_state.get_all_signals()))
@@ -317,7 +356,12 @@ with st.sidebar:
     show_pe = st.checkbox("Show PE", value=True)
 
 # ── WELCOME ──────────────────────────────────────────────────────────────────
-if not st.session_state.feed_started:
+_feed_active = (
+    st.session_state.feed_started
+    or app_state.connected
+    or len(app_state.instruments) > 0
+)
+if not _feed_active:
     st.title("🎯 MaaNiish Arrow")
     st.markdown("""
     ### Setup
@@ -368,7 +412,7 @@ for tab, idx_name in zip([t_nifty, t_bank, t_sensex], ["NIFTY","BANKNIFTY","SENS
         with st.expander("📊 Live Prices — All Strikes (ATM ±5)", expanded=True):
             st.dataframe(
                 _price_table(instruments, all_signals),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 height=min(40+len(instruments)*35, 450),
             )
@@ -391,7 +435,7 @@ for tab, idx_name in zip([t_nifty, t_bank, t_sensex], ["NIFTY","BANKNIFTY","SENS
                 if not inst: continue
                 candles = app_state.get_candles(inst["security_id"])
                 st.plotly_chart(_build_chart(candles, inst, all_signals=all_signals),
-                                use_container_width=True, key=f"chart_{inst['security_id']}")
+                                width="stretch", key=f"chart_{inst['security_id']}")
                 cur = app_state.current_candles.get(inst["security_id"], {})
                 if cur:
                     ltp_v = cur.get("close",0); high_v = cur.get("high",0); bid_v = cur.get("top_bid_high",0)
@@ -419,4 +463,4 @@ with t_log:
         sdf["Top Bid"]    = sdf["top_bid"].round(2)
         sdf["Bid>High"]   = sdf["excess"].round(2)
         st.dataframe(sdf[["Time","Instrument","Candle High","Top Bid","Bid>High"]],
-                     use_container_width=True, hide_index=True, height=500)
+                     width="stretch", hide_index=True, height=500)
