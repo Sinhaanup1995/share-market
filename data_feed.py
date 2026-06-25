@@ -46,7 +46,15 @@ class DhanFeedManager:
         """Register instruments and launch a daemon thread that connects
         with exponential-backoff retry on 429 / transient errors."""
         self._register_instruments(instruments)
-        self._instruments = instruments          # keep for reconnects
+
+        # Also subscribe index spot instruments so live spot price updates flow in.
+        # These are NOT in _inst_map so _on_tick routes them to _handle_index_tick.
+        from config import INDEX_SECURITY_IDS
+        index_insts = [
+            {"security_id": info["security_id"], "exchange_segment": "IDX_I"}
+            for info in INDEX_SECURITY_IDS.values()
+        ]
+        self._instruments = list(instruments) + index_insts   # full sub list
 
         t = threading.Thread(
             target=self._connect_loop,

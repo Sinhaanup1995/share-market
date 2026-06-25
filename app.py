@@ -149,16 +149,33 @@ def _build_chart(candles, instrument, all_signals=None):
     )
     return fig
 
-def _price_table(instruments, all_signals):
+def _price_table(instruments, all_signals, spot=0):
+    from config import STRIKE_INTERVALS
     rows = []
-    for inst in sorted(instruments, key=lambda x:(x.get("option_type",""),x.get("strike_price",0))):
+    # Dynamically compute ATM from live spot so labels update as market moves
+    idx_name = instruments[0].get("index", "NIFTY") if instruments else "NIFTY"
+    step = STRIKE_INTERVALS.get(idx_name, 50)
+    live_atm = int(round(spot / step) * step) if spot > 0 else 0
+    for inst in sorted(instruments, key=lambda x:(x.get("strike_price",0),x.get("option_type",""))):
         sid = inst["security_id"]
         cur = app_state.current_candles.get(sid, {})
         def f(v): return f"{v:.2f}" if isinstance(v, (int,float)) else "—"
         has_sig = any(s.get("security_id")==sid for s in all_signals)
         candles = app_state.get_candles(sid)
+        strike = int(inst.get("strike_price", 0))
+        if live_atm > 0:
+            diff = (strike - live_atm) // step
+        else:
+            diff = inst.get("atm_distance", 0)  # fallback: calculated at startup
+        if diff == 0:
+            pos = "★ ATM"
+        elif diff > 0:
+            pos = f"+{diff}"
+        else:
+            pos = str(diff)
         rows.append({
-            "Strike":   int(inst.get("strike_price",0)),
+            "Strike":   strike,
+            "Pos":      pos,
             "Type":     inst.get("option_type",""),
             "LTP":      f(cur.get("close","")),
             "C.High":   f(cur.get("high","")),
@@ -411,7 +428,7 @@ for tab, idx_name in zip([t_nifty, t_bank, t_sensex], ["NIFTY","BANKNIFTY","SENS
         # Live price table
         with st.expander("📊 Live Prices — All Strikes (ATM ±5)", expanded=True):
             st.dataframe(
-                _price_table(instruments, all_signals),
+                _price_table(instruments, all_signals, spot=spot_val),
                 width="stretch",
                 hide_index=True,
                 height=min(40+len(instruments)*35, 450),
@@ -429,7 +446,12 @@ for tab, idx_name in zip([t_nifty, t_bank, t_sensex], ["NIFTY","BANKNIFTY","SENS
             with col:
                 st.markdown(f"**{opt_type}**")
                 strikes  = [int(i["strike_price"]) for i in inst_list]
-                selected = st.selectbox("Strike", strikes, index=len(strikes)//2,
+                # Default to live ATM strike (or middle if spot unknown)
+                from config import STRIKE_INTERVALS as _SI
+                _step = _SI.get(idx_name, 50)
+                _atm  = int(round(spot_val / _step) * _step) if spot_val > 0 else 0
+                _def  = strikes.index(_atm) if _atm in strikes else len(strikes)//2
+                selected = st.selectbox("Strike", strikes, index=_def,
                                         key=f"sel_{idx_name}_{opt_type}", label_visibility="collapsed")
                 inst = next((i for i in inst_list if int(i["strike_price"])==selected), None)
                 if not inst: continue
