@@ -93,6 +93,13 @@ def load_today_candles(
             to_date=today,
             interval=1,
         )
+        # Log the raw response for the first few instruments to help diagnose issues
+        if resp and resp.get("status") != "success":
+            logger.warning(
+                "history_loader: API failure for %s seg=%s: %s",
+                security_id, exchange_segment,
+                str(resp)[:300],
+            )
         candles = _parse_response(resp)
         logger.debug("history_loader: %s → %d candles", security_id, len(candles))
         return candles
@@ -108,8 +115,11 @@ def preload_into_state(dhan, instruments: list, app_state):
     """
     import time
 
+    app_state.history_loaded = False
+    app_state.history_error  = None
     logger.info("history_loader: pre-loading candles for %d instruments…", len(instruments))
     loaded = 0
+    errors = 0
     for i, inst in enumerate(instruments):
         sid = inst["security_id"]
         seg = inst["exchange_segment"]
@@ -121,10 +131,22 @@ def preload_into_state(dhan, instruments: list, app_state):
         candles = load_today_candles(dhan, sid, seg)
         for c in candles:
             app_state.close_candle(sid, c)
-        loaded += len(candles)
+        if candles:
+            loaded += len(candles)
+        else:
+            errors += 1
 
         # Throttle to avoid REST API rate limiting (100ms per instrument)
         if i % 10 == 9:
             time.sleep(0.5)
 
-    logger.info("history_loader: loaded %d total historical candles", loaded)
+    app_state.history_loaded        = True
+    app_state.history_candles_count = loaded
+    if loaded == 0:
+        app_state.history_error = (
+            f"REST API returned no candles for any of the {len(instruments)} instruments. "
+            "Possible reasons: market not yet open, holiday, or token issue."
+        )
+        logger.warning("history_loader: loaded 0 candles (%d instruments tried)", errors)
+    else:
+        logger.info("history_loader: loaded %d total historical candles", loaded)

@@ -83,8 +83,14 @@ def _build_chart(candles, instrument, all_signals=None):
     fig   = go.Figure()
 
     if not candles:
+        if not app_state.history_loaded:
+            msg = "⏳ Loading today's candles…"
+        elif app_state.history_error:
+            msg = "No historical data — live candles will form as ticks arrive"
+        else:
+            msg = "Waiting for first tick on this strike…"
         fig.add_annotation(
-            text="⏳ Loading today's candles… (check back in a few seconds)",
+            text=msg,
             xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False,
             font=dict(size=13, color="#aaa"))
         fig.update_layout(
@@ -419,11 +425,34 @@ for tab, idx_name in zip([t_nifty, t_bank, t_sensex], ["NIFTY","BANKNIFTY","SENS
         spot_val   = app_state.spot_prices.get(idx_name, 0)
         idx_sigs   = [s for s in all_signals if s.get("index")==idx_name]
 
-        m1,m2,m3,m4 = st.columns(4)
+        m1,m2,m3,m4,m5 = st.columns([2,2,2,2,1])
         m1.metric("Expiry",   expiry_str)
         m2.metric("Spot",     f"{spot_val:,.0f}" if spot_val else "—")
         m3.metric("Tracking", f"{len(instruments)} options")
         m4.metric("Signals",  len(idx_sigs))
+        # History load status + reload button
+        if not app_state.history_loaded:
+            st.caption("⏳ Loading historical candles…")
+        elif app_state.history_error:
+            st.warning(f"⚠️ {app_state.history_error}")
+            if m5.button("🔄", key=f"reload_{idx_name}",
+                         help="Reload today's historical candles from Dhan REST API"):
+                import threading
+                from dhanhq import dhanhq as DhanHQ, DhanContext
+                from history_loader import preload_into_state
+                from config import DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN
+                _cid = st.session_state.get("client_id") or DHAN_CLIENT_ID
+                _tok = st.session_state.get("access_token") or DHAN_ACCESS_TOKEN
+                _ctx  = DhanContext(_cid, _tok)
+                _dhan = DhanHQ(_ctx)
+                threading.Thread(
+                    target=preload_into_state,
+                    args=(_dhan, app_state.get_instruments(), app_state),
+                    daemon=True, name="HistoryReload",
+                ).start()
+                st.rerun()
+        else:
+            st.caption(f"✅ {app_state.history_candles_count} historical candles loaded")
 
         # Live price table
         with st.expander("📊 Live Prices — All Strikes (ATM ±5)", expanded=True):

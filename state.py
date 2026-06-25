@@ -36,6 +36,11 @@ class AppState:
         # Current spot prices  index -> float
         self.spot_prices: Dict[str, float] = {}
 
+        # Historical preload tracking
+        self.history_loaded: bool = False
+        self.history_candles_count: int = 0
+        self.history_error: Optional[str] = None
+
     # ------------------------------------------------------------------ #
     #  Instrument registry                                                 #
     # ------------------------------------------------------------------ #
