@@ -32,6 +32,7 @@ from state import app_state
 _DEFAULTS = {
     "feed_started":  False,
     "feed_manager":  None,
+    "live_poller":   None,
     # Credentials are intentionally blank in the UI.
     # Set DHAN_CLIENT_ID / DHAN_ACCESS_TOKEN in .env for local dev only—
     # never expose them in a public deployment.
@@ -254,6 +255,13 @@ def _start_feed(client_id, access_token, manual_spots):
     feed.start(instruments)
     st.session_state.feed_manager = feed
 
+    # Start REST poller (5-second interval) for live LTP + ATM shift detection
+    from live_poller import LivePoller
+    poller = LivePoller(dhan, interval=5)
+    poller.set_feed_manager(feed)
+    poller.start(instruments)
+    st.session_state.live_poller = poller
+
     # Pre-load today's historical 1-min candles in a background thread
     # so charts are populated immediately without waiting for live ticks
     threading.Thread(
@@ -404,11 +412,13 @@ if not _feed_active:
 all_signals = app_state.get_all_signals()
 
 # Header metrics
-h1,h2,h3,h4 = st.columns([3,1,1,1])
+h1,h2,h3,h4,h5 = st.columns([3,1,1,1,1])
 h1.markdown("## 🎯 MaaNiish Arrow — Live")
 h2.metric("Instruments", len(app_state.get_instruments()))
 h3.metric("Signals Today", len(all_signals))
 h4.metric("Last Tick", app_state.last_update.strftime("%H:%M:%S") if app_state.last_update else "—")
+_poller_ok = st.session_state.get("live_poller") is not None
+h5.metric("5s Poller", "✅ ON" if _poller_ok else "⚪ OFF")
 st.divider()
 
 # ── TABS ─────────────────────────────────────────────────────────────────────
@@ -423,13 +433,17 @@ for tab, idx_name in zip([t_nifty, t_bank, t_sensex], ["NIFTY","BANKNIFTY","SENS
 
         expiry_str = str(instruments[0].get("expiry_date","—"))
         spot_val   = app_state.spot_prices.get(idx_name, 0)
+        live_atm   = app_state.current_atm.get(idx_name, 0)
         idx_sigs   = [s for s in all_signals if s.get("index")==idx_name]
 
         m1,m2,m3,m4,m5 = st.columns([2,2,2,2,1])
         m1.metric("Expiry",   expiry_str)
         m2.metric("Spot",     f"{spot_val:,.0f}" if spot_val else "—")
-        m3.metric("Tracking", f"{len(instruments)} options")
+        m3.metric("Live ATM", f"{live_atm:,}" if live_atm else "—")
         m4.metric("Signals",  len(idx_sigs))
+        # ATM shift alert
+        if app_state.atm_shifted.get(idx_name):
+            st.warning(f"🔄 {idx_name} ATM shifted → **{live_atm:,}** — resubscribing new strikes…")
         # History load status + reload button
         if not app_state.history_loaded:
             st.caption("⏳ Loading historical candles…")

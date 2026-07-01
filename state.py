@@ -41,6 +41,10 @@ class AppState:
         self.history_candles_count: int = 0
         self.history_error: Optional[str] = None
 
+        # Live ATM tracking (updated every 5 s by LivePoller)
+        self.current_atm: Dict[str, int]  = {}   # index -> current ATM strike
+        self.atm_shifted: Dict[str, bool] = {}   # index -> True when resub pending
+
     # ------------------------------------------------------------------ #
     #  Instrument registry                                                 #
     # ------------------------------------------------------------------ #

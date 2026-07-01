@@ -117,6 +117,36 @@ class DhanFeedManager:
     def is_alive(self) -> bool:
         return self._feed is not None
 
+    def resubscribe(self, instruments: List[dict]):
+        """
+        Register new instruments that appeared after an ATM shift.
+        Tries dynamic WebSocket subscribe first; falls back to registering
+        so they are active on the next reconnect.
+        """
+        from config import INDEX_SECURITY_IDS
+        new = [i for i in instruments if i["security_id"] not in self._inst_map]
+        if new:
+            self._register_instruments(new)
+            logger.info("DhanFeedManager.resubscribe: %d new instruments registered", len(new))
+
+        # Rebuild full sub list (options + index spots)
+        index_insts = [
+            {"security_id": info["security_id"], "exchange_segment": "IDX_I"}
+            for info in INDEX_SECURITY_IDS.values()
+        ]
+        self._instruments = list(instruments) + index_insts
+
+        # Try dynamic subscribe if the feed object supports it
+        if self._feed and new:
+            try:
+                from dhanhq import marketfeed
+                sub_list = self._build_sub_list(new, marketfeed)
+                if hasattr(self._feed, "subscribe"):
+                    self._feed.subscribe(sub_list)
+                    logger.info("DhanFeedManager: dynamically subscribed %d instruments", len(new))
+            except Exception as exc:
+                logger.warning("DhanFeedManager: dynamic subscribe failed (%s) – active on reconnect", exc)
+
     def pop_pending_alerts(self):
         return self._alert_mgr.pop_pending()
 
