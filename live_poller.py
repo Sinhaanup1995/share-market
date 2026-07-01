@@ -232,3 +232,18 @@ class LivePoller:
             )
         except Exception as exc:
             logger.error("LivePoller: resubscribe error for %s: %s", changed_idx, exc)
+
+
+# ── Module-level singleton ────────────────────────────────────────────────────
+# Stored here (not in st.session_state) so it survives Streamlit hot-reloads.
+_instance: Optional[LivePoller] = None
+
+
+def get_instance() -> Optional["LivePoller"]:
+    """Return the running LivePoller, or None if not yet started."""
+    return _instance
+
+
+def set_instance(poller: "LivePoller") -> None:
+    global _instance
+    _instance = poller

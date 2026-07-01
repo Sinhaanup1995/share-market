@@ -256,10 +256,11 @@ def _start_feed(client_id, access_token, manual_spots):
     st.session_state.feed_manager = feed
 
     # Start REST poller (5-second interval) for live LTP + ATM shift detection
-    from live_poller import LivePoller
+    from live_poller import LivePoller, set_instance as _set_poller
     poller = LivePoller(dhan, interval=5)
     poller.set_feed_manager(feed)
     poller.start(instruments)
+    _set_poller(poller)                      # persist across Streamlit reruns
     st.session_state.live_poller = poller
 
     # Pre-load today's historical 1-min candles in a background thread
@@ -417,7 +418,8 @@ h1.markdown("## 🎯 MaaNiish Arrow — Live")
 h2.metric("Instruments", len(app_state.get_instruments()))
 h3.metric("Signals Today", len(all_signals))
 h4.metric("Last Tick", app_state.last_update.strftime("%H:%M:%S") if app_state.last_update else "—")
-_poller_ok = st.session_state.get("live_poller") is not None
+from live_poller import get_instance as _get_poller
+_poller_ok = _get_poller() is not None and getattr(_get_poller(), "_running", False)
 h5.metric("5s Poller", "✅ ON" if _poller_ok else "⚪ OFF")
 st.divider()
 
