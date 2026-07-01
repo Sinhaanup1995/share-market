@@ -53,6 +53,10 @@ class LivePoller:
             self._on_atm_shift = on_atm_shift
             self._running      = True
         # Initialise ATM from first spot prices (may be 0 until first poll)
+        if not hasattr(app_state, "current_atm"):
+            app_state.current_atm = {}
+        if not hasattr(app_state, "atm_shifted"):
+            app_state.atm_shifted = {}
         for idx, step in STRIKE_INTERVALS.items():
             spot = app_state.spot_prices.get(idx, 0)
             if spot > 0:
@@ -163,15 +167,17 @@ class LivePoller:
     # ------------------------------------------------------------------ #
 
     def _check_atm_shift(self):
+        _cur_atm  = getattr(app_state, "current_atm",  {})
+        _atm_shft = getattr(app_state, "atm_shifted", {})
         for idx, step in STRIKE_INTERVALS.items():
             spot = app_state.spot_prices.get(idx, 0)
             if spot <= 0:
                 continue
             new_atm = int(round(spot / step) * step)
-            old_atm = app_state.current_atm.get(idx, 0)
+            old_atm = _cur_atm.get(idx, 0)
 
             if old_atm == 0:
-                app_state.current_atm[idx] = new_atm
+                _cur_atm[idx] = new_atm
                 continue
 
             shift = abs(new_atm - old_atm) // step
@@ -180,8 +186,8 @@ class LivePoller:
                     "LivePoller: %s ATM %d → %d  (shift=%+d strikes)",
                     idx, old_atm, new_atm, (new_atm - old_atm) // step,
                 )
-                app_state.current_atm[idx]  = new_atm
-                app_state.atm_shifted[idx]  = True
+                _cur_atm[idx]  = new_atm
+                _atm_shft[idx] = True
 
                 # Auto-resubscribe in a separate thread so this loop isn't blocked
                 threading.Thread(
@@ -190,7 +196,6 @@ class LivePoller:
                     daemon=True,
                     name=f"ATMResub-{idx}",
                 ).start()
-
                 if self._on_atm_shift:
                     try:
                         self._on_atm_shift(idx, old_atm, new_atm)
@@ -220,7 +225,7 @@ class LivePoller:
 
             # Update poller's own instrument list
             self.update_instruments(new_instruments)
-            app_state.atm_shifted[changed_idx] = False   # cleared after resub
+            getattr(app_state, "atm_shifted", {})[changed_idx] = False   # cleared after resub
             logger.info(
                 "LivePoller: resubscribed %d instruments after %s ATM shift",
                 len(new_instruments), changed_idx,

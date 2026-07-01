@@ -433,7 +433,7 @@ for tab, idx_name in zip([t_nifty, t_bank, t_sensex], ["NIFTY","BANKNIFTY","SENS
 
         expiry_str = str(instruments[0].get("expiry_date","—"))
         spot_val   = app_state.spot_prices.get(idx_name, 0)
-        live_atm   = app_state.current_atm.get(idx_name, 0)
+        live_atm   = getattr(app_state, "current_atm", {}).get(idx_name, 0)
         idx_sigs   = [s for s in all_signals if s.get("index")==idx_name]
 
         m1,m2,m3,m4,m5 = st.columns([2,2,2,2,1])
@@ -442,7 +442,7 @@ for tab, idx_name in zip([t_nifty, t_bank, t_sensex], ["NIFTY","BANKNIFTY","SENS
         m3.metric("Live ATM", f"{live_atm:,}" if live_atm else "—")
         m4.metric("Signals",  len(idx_sigs))
         # ATM shift alert
-        if app_state.atm_shifted.get(idx_name):
+        if getattr(app_state, "atm_shifted", {}).get(idx_name):
             st.warning(f"🔄 {idx_name} ATM shifted → **{live_atm:,}** — resubscribing new strikes…")
         # History load status + reload button
         if not app_state.history_loaded:
