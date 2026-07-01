@@ -115,7 +115,7 @@ class LivePoller:
             return
 
         if not isinstance(resp, dict) or resp.get("status") != "success":
-            logger.debug("LivePoller: bad response: %s", str(resp)[:200])
+            logger.warning("LivePoller: bad API response: %s", str(resp)[:300])
             return
 
         now      = datetime.now(IST)
@@ -160,7 +160,17 @@ class LivePoller:
                         })
                     app_state.last_update = now
 
-        logger.debug("LivePoller: quotes updated for %d options", len(inst_map))
+        # Track successful poll
+        app_state.last_poll_time = now
+        app_state.poll_count     = getattr(app_state, "poll_count", 0) + 1
+        logger.info(
+            "LivePoller #%d: %d options updated  NIFTY=%.0f  BANKNIFTY=%.0f  SENSEX=%.0f",
+            app_state.poll_count,
+            len(inst_map),
+            app_state.spot_prices.get("NIFTY", 0),
+            app_state.spot_prices.get("BANKNIFTY", 0),
+            app_state.spot_prices.get("SENSEX", 0),
+        )
 
     # ------------------------------------------------------------------ #
     #  ATM shift detection & auto-resubscription                          #

@@ -419,8 +419,14 @@ h2.metric("Instruments", len(app_state.get_instruments()))
 h3.metric("Signals Today", len(all_signals))
 h4.metric("Last Tick", app_state.last_update.strftime("%H:%M:%S") if app_state.last_update else "—")
 from live_poller import get_instance as _get_poller
-_poller_ok = _get_poller() is not None and getattr(_get_poller(), "_running", False)
-h5.metric("5s Poller", "✅ ON" if _poller_ok else "⚪ OFF")
+_poller      = _get_poller()
+_poller_ok   = _poller is not None and getattr(_poller, "_running", False)
+_last_poll   = getattr(app_state, "last_poll_time", None)
+_poll_count  = getattr(app_state, "poll_count", 0)
+h5.metric("5s Poller",
+          f"✅ #{_poll_count}" if _poller_ok and _poll_count else ("✅ ON" if _poller_ok else "⚪ OFF"),
+          delta=_last_poll.strftime("%H:%M:%S") if _last_poll else None,
+          delta_color="off")
 st.divider()
 
 # ── TABS ─────────────────────────────────────────────────────────────────────

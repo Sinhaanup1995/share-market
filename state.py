@@ -33,6 +33,10 @@ class AppState:
 
         self.last_update: Optional[datetime] = None
 
+        # REST poller health
+        self.last_poll_time: Optional[datetime] = None
+        self.poll_count: int = 0
+
         # Current spot prices  index -> float
         self.spot_prices: Dict[str, float] = {}
 
